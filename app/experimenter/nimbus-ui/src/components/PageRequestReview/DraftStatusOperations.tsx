@@ -39,6 +39,7 @@ export const DraftStatusOperations = ({
   currentUsername = "",
   currentUserCanApprove = false,
   rejectFeedback,
+  rsRequestTimedOut,
   rejectExperimentLaunch,
   approveExperimentLaunch,
   confirmExperimentLaunchApproval,
@@ -53,6 +54,7 @@ export const DraftStatusOperations = ({
   currentUsername: string;
   currentUserCanApprove: boolean;
   rejectFeedback: RejectFeedback;
+  rsRequestTimedOut: boolean;
   rejectExperimentLaunch: (fields: { reason: string }) => void;
   approveExperimentLaunch: () => void;
   confirmExperimentLaunchApproval: () => void;
@@ -100,15 +102,23 @@ export const DraftStatusOperations = ({
     /* istanbul ignore next until EXP-1055 & EXP-1062 done */
     case DraftStatusOperationsState.LaunchApproveOrReject:
       return (
-        <FormApproveOrRejectLaunch
-          {...{
-            isLoading,
-            launchRequestedByUsername,
-            onApprove: handleLaunchApprovalClicked,
-            onReject: () =>
-              setDraftUIState(DraftStatusOperationsState.LaunchRejection),
-          }}
-        />
+        <>
+          {rsRequestTimedOut && (
+            <p className="border border-danger text-danger px-2 py-4 mb-3">
+              ❌ Your remote settings request has timed out, please approve and
+              launch through Remote Settings again
+            </p>
+          )}
+          <FormApproveOrRejectLaunch
+            {...{
+              isLoading,
+              launchRequestedByUsername,
+              onApprove: handleLaunchApprovalClicked,
+              onReject: () =>
+                setDraftUIState(DraftStatusOperationsState.LaunchRejection),
+            }}
+          />
+        </>
       );
 
     /* istanbul ignore next until EXP-1055 & EXP-1062 done */

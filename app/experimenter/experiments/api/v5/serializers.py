@@ -175,10 +175,36 @@ class NimbusExperimentBranchMixin:
         return experiment
 
 
-class NimbusStatusRestrictionMixin:
+class BaseStatusValidationMixin:
+    def validate(self, data):
+        data = super().validate(data)
+
+        if self.instance:
+            new_value = data.get(self.FIELD)
+            instance_value = getattr(self.instance, self.FIELD)
+
+            if (
+                new_value
+                and new_value != instance_value
+                and new_value not in self.VALID_TRANSITIONS.get(instance_value, ())
+            ):
+                raise serializers.ValidationError(
+                    {
+                        self.FIELD: [
+                            f"Nimbus Experiment {self.FIELD} cannot transition "
+                            f"from {instance_value} to {new_value}."
+                        ]
+                    }
+                )
+
+        return data
+
+
+class StatusValidationMixin(BaseStatusValidationMixin):
     ALLOWS_STATUS_CHANGE_ONLY = (NimbusExperiment.Status.PREVIEW,)
-    ALLOWS_UPDATE = (NimbusExperiment.Status.DRAFT,)
-    VALID_STATUS_TRANSITIONS = {
+    ALLOWS_STATUS_UPDATE = (NimbusExperiment.Status.DRAFT,)
+    FIELD = "status"
+    VALID_TRANSITIONS = {
         NimbusExperiment.Status.DRAFT: (
             NimbusExperiment.Status.PREVIEW,
             NimbusExperiment.Status.REVIEW,
@@ -191,6 +217,7 @@ class NimbusStatusRestrictionMixin:
 
     def validate(self, data):
         data = super().validate(data)
+
         if self.instance:
             status = self.instance.status
             if status in self.ALLOWS_STATUS_CHANGE_ONLY:
@@ -198,36 +225,55 @@ class NimbusStatusRestrictionMixin:
                     raise serializers.ValidationError(
                         {
                             "experiment": [
-                                f"Nimbus Experiment has status '{status}', only "
+                                f"Nimbus Experiment has status {status}, only "
                                 "status can be changed."
                             ]
                         }
                     )
-            elif status not in self.ALLOWS_UPDATE:
-                required_statuses = ", ".join(self.ALLOWS_UPDATE)
+            elif status not in self.ALLOWS_STATUS_UPDATE:
+                required_statuses = ", ".join(self.ALLOWS_STATUS_UPDATE)
                 raise serializers.ValidationError(
                     {
                         "experiment": [
-                            f"Nimbus Experiment has status '{status}', but can only "
-                            f"be changed when set to '{required_statuses}'."
+                            f"Nimbus Experiment has status {status}, but can only "
+                            f"be changed when set to {required_statuses}."
                         ]
                     }
                 )
 
         return data
 
-    def validate_status(self, value):
-        if (
-            self.instance
-            and value != self.instance.status
-            and value not in self.VALID_STATUS_TRANSITIONS.get(self.instance.status, ())
-        ):
-            status = self.instance.status
-            raise serializers.ValidationError(
-                f"Nimbus Experiment status cannot transition from {status} to {value}."
-            )
 
-        return value
+class PublishStatusValidationMixin(BaseStatusValidationMixin):
+    ALLOWS_EXPERIMENT_CHANGES = (NimbusExperiment.PublishStatus.IDLE,)
+    FIELD = "publish_status"
+    VALID_TRANSITIONS = {
+        NimbusExperiment.PublishStatus.IDLE: (NimbusExperiment.PublishStatus.REVIEW,),
+        NimbusExperiment.PublishStatus.REVIEW: (
+            NimbusExperiment.PublishStatus.IDLE,
+            NimbusExperiment.PublishStatus.APPROVED,
+        ),
+    }
+
+    def validate(self, data):
+        data = super().validate(data)
+
+        if self.instance:
+            publish_status = self.instance.publish_status
+            if publish_status not in self.ALLOWS_EXPERIMENT_CHANGES and set(
+                data.keys()
+            ) != {"publish_status"}:
+                required_publish_statuses = ", ".join(self.ALLOWS_EXPERIMENT_CHANGES)
+                raise serializers.ValidationError(
+                    {
+                        "experiment": [
+                            f"Nimbus Experiment has publish status {publish_status} but "
+                            f"can only be changed with {required_publish_statuses}."
+                        ]
+                    }
+                )
+
+        return data
 
 
 class NimbusDocumentationLinkSerializer(serializers.ModelSerializer):
@@ -258,7 +304,8 @@ class NimbusExperimentDocumentationLinkMixin:
 class NimbusExperimentSerializer(
     NimbusExperimentBranchMixin,
     NimbusExperimentDocumentationLinkMixin,
-    NimbusStatusRestrictionMixin,
+    StatusValidationMixin,
+    PublishStatusValidationMixin,
     serializers.ModelSerializer,
 ):
     name = serializers.CharField(
@@ -451,7 +498,9 @@ class NimbusExperimentSerializer(
 
 
 class NimbusReadyForReviewSerializer(
-    NimbusStatusRestrictionMixin, serializers.ModelSerializer
+    StatusValidationMixin,
+    PublishStatusValidationMixin,
+    serializers.ModelSerializer,
 ):
     public_description = serializers.CharField(required=True)
     proposed_duration = serializers.IntegerField(required=True, min_value=1)

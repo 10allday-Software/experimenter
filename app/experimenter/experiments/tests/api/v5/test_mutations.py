@@ -4,6 +4,7 @@ from django.conf import settings
 from django.urls import reverse
 from graphene_django.utils.testing import GraphQLTestCase
 
+from experimenter.experiments.changelog_utils.nimbus import generate_nimbus_changelog
 from experimenter.experiments.constants.nimbus import NimbusConstants
 from experimenter.experiments.models.nimbus import NimbusExperiment, NimbusFeatureConfig
 from experimenter.experiments.tests.factories.nimbus import (
@@ -455,73 +456,6 @@ class TestMutations(GraphQLTestCase):
             },
         )
 
-    def test_update_experiment_status(self):
-        user_email = "user@example.com"
-        experiment = NimbusExperimentFactory.create(
-            status=NimbusExperiment.Status.DRAFT,
-        )
-        response = self.query(
-            UPDATE_EXPERIMENT_MUTATION,
-            variables={
-                "input": {
-                    "id": experiment.id,
-                    "status": NimbusExperiment.Status.REVIEW.name,
-                }
-            },
-            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
-        )
-        self.assertEqual(response.status_code, 200)
-
-        experiment = NimbusExperiment.objects.get(id=experiment.id)
-        self.assertEqual(experiment.status, NimbusExperiment.Status.REVIEW)
-
-    def test_update_experiment_status_error(self):
-        user_email = "user@example.com"
-        experiment = NimbusExperimentFactory.create(
-            status=NimbusExperiment.Status.ACCEPTED,
-        )
-        response = self.query(
-            UPDATE_EXPERIMENT_MUTATION,
-            variables={
-                "input": {
-                    "id": experiment.id,
-                    "status": NimbusExperiment.Status.REVIEW.name,
-                }
-            },
-            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
-        )
-        self.assertEqual(response.status_code, 200, response.content)
-        content = json.loads(response.content)
-        result = content["data"]["updateExperiment"]
-        self.assertEqual(
-            result["message"],
-            {
-                "status": [
-                    "Nimbus Experiment status cannot transition from Accepted to Review."
-                ]
-            },
-        )
-
-    def test_update_experiment_publish_status(self):
-        user_email = "user@example.com"
-        experiment = NimbusExperimentFactory.create(
-            publish_status=NimbusExperiment.PublishStatus.IDLE,
-        )
-        response = self.query(
-            UPDATE_EXPERIMENT_MUTATION,
-            variables={
-                "input": {
-                    "id": experiment.id,
-                    "publishStatus": NimbusExperiment.PublishStatus.REVIEW.name,
-                }
-            },
-            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
-        )
-        self.assertEqual(response.status_code, 200)
-
-        experiment = NimbusExperiment.objects.get(id=experiment.id)
-        self.assertEqual(experiment.publish_status, NimbusExperiment.PublishStatus.REVIEW)
-
     def test_end_experiment_in_kinto(self):
         user_email = "user@example.com"
         experiment = NimbusExperimentFactory.create(
@@ -569,3 +503,137 @@ class TestMutations(GraphQLTestCase):
 
         experiment = NimbusExperiment.objects.get(id=experiment.id)
         self.assertEqual(experiment.is_end_requested, False)
+
+
+class TestStatusValidationMixin(GraphQLTestCase):
+    GRAPHQL_URL = reverse("nimbus-api-graphql")
+    maxDiff = None
+
+    def test_update_experiment_status(self):
+        user_email = "user@example.com"
+        experiment = NimbusExperimentFactory.create(
+            status=NimbusExperiment.Status.DRAFT,
+        )
+        response = self.query(
+            UPDATE_EXPERIMENT_MUTATION,
+            variables={
+                "input": {
+                    "id": experiment.id,
+                    "status": NimbusExperiment.Status.REVIEW.name,
+                }
+            },
+            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        experiment = NimbusExperiment.objects.get(id=experiment.id)
+        self.assertEqual(experiment.status, NimbusExperiment.Status.REVIEW)
+
+    def test_update_experiment_status_error(self):
+        user_email = "user@example.com"
+        experiment = NimbusExperimentFactory.create(
+            status=NimbusExperiment.Status.ACCEPTED,
+        )
+        response = self.query(
+            UPDATE_EXPERIMENT_MUTATION,
+            variables={
+                "input": {
+                    "id": experiment.id,
+                    "status": NimbusExperiment.Status.REVIEW.name,
+                }
+            },
+            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        content = json.loads(response.content)
+        result = content["data"]["updateExperiment"]
+        self.assertEqual(
+            result["message"],
+            {
+                "status": [
+                    "Nimbus Experiment status cannot transition from Accepted to Review."
+                ]
+            },
+        )
+
+
+class TestPublishStatusValidationMixin(GraphQLTestCase):
+    GRAPHQL_URL = reverse("nimbus-api-graphql")
+    maxDiff = None
+
+    def test_update_experiment_publish_status(self):
+        user_email = "user@example.com"
+        experiment = NimbusExperimentFactory.create(
+            publish_status=NimbusExperiment.PublishStatus.IDLE,
+        )
+        response = self.query(
+            UPDATE_EXPERIMENT_MUTATION,
+            variables={
+                "input": {
+                    "id": experiment.id,
+                    "publishStatus": NimbusExperiment.PublishStatus.REVIEW.name,
+                }
+            },
+            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        experiment = NimbusExperiment.objects.get(id=experiment.id)
+        self.assertEqual(experiment.publish_status, NimbusExperiment.PublishStatus.REVIEW)
+
+    def test_update_experiment_with_invalid_publish_status_error(self):
+        user_email = "user@example.com"
+        experiment = NimbusExperimentFactory.create(
+            publish_status=NimbusExperiment.PublishStatus.REVIEW,
+        )
+        response = self.query(
+            UPDATE_EXPERIMENT_MUTATION,
+            variables={
+                "input": {
+                    "id": experiment.id,
+                    "publicDescription": "yogurt",
+                }
+            },
+            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        content = json.loads(response.content)
+        result = content["data"]["updateExperiment"]
+        self.assertEqual(
+            result["message"],
+            {
+                "experiment": [
+                    "Nimbus Experiment has publish status Review "
+                    "but can only be changed with Idle."
+                ]
+            },
+        )
+
+    def test_update_publish_status_from_approved_to_review_error(self):
+        user_email = "user@example.com"
+        experiment = NimbusExperimentFactory.create(
+            publish_status=NimbusExperiment.PublishStatus.APPROVED,
+        )
+
+        response = self.query(
+            UPDATE_EXPERIMENT_MUTATION,
+            variables={
+                "input": {
+                    "id": experiment.id,
+                    "publishStatus": NimbusExperiment.PublishStatus.REVIEW.name,
+                }
+            },
+            headers={settings.OPENIDC_EMAIL_HEADER: user_email},
+        )
+        self.assertEqual(response.status_code, 200)
+        content = json.loads(response.content)
+        result = content["data"]["updateExperiment"]
+        self.assertEqual(
+            result["message"],
+            {
+                "publish_status": [
+                    "Nimbus Experiment publish_status cannot transition "
+                    "from Approved to Review."
+                ]
+            },
+        )

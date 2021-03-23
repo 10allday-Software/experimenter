@@ -964,8 +964,7 @@ class TestNimbusExperimentSerializer(TestCase):
             serializer.errors,
             {
                 "experiment": [
-                    "Nimbus Experiment has status 'Preview', only status "
-                    "can be changed."
+                    "Nimbus Experiment has status Preview, only status can be changed."
                 ]
             },
             serializer.errors,
